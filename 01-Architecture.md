@@ -63,10 +63,10 @@ Snowflake utilizes a **Multi-Cluster Shared-Data Architecture**. It separates th
 
 * **Engine:** A distributed, stateless service layer backed by a transactional metadata store (FoundationDB).
 * **Key Responsibilities:**
-* **Metadata Management:** Tracks micro-partition file pointers, offsets, column min/max ranges, distinct values, and modification histories.
-* **Query Optimization & Compilation:** Parses SQL, applies rule/cost-based optimizations using metadata, and generates execution plans for Virtual Warehouses.
-* **Transaction Control:** Enforces ACID compliance across concurrent workloads using **Snapshot Isolation (MVCC)**.
-* **Security & Governance:** Handles user authentication, RBAC (Role-Based Access Control), end-to-end encryption key management, and session states.
+  * **Metadata Management:** Tracks micro-partition file pointers, offsets, column min/max ranges, distinct values, and modification histories.
+  * **Query Optimization & Compilation:** Parses SQL, applies rule/cost-based optimizations using metadata, and generates execution plans for Virtual Warehouses.
+  * **Transaction Control:** Enforces ACID compliance across concurrent workloads using **Snapshot Isolation (MVCC)**.
+  * **Security & Governance:** Handles user authentication, RBAC (Role-Based Access Control), end-to-end encryption key management, and session states.
 
 <br></br>
 
