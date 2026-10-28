@@ -1,4 +1,4 @@
-# Snowflake Databases, Schemas, Types & Constraints (Referential Integrity) - Complete Guide
+# Snowflake Databases, Schemas, Types & Constraints
 <br></br>
 ## 1. The Object Hierarchy and Namespaces
 
@@ -19,7 +19,8 @@
 | **Schema** | Logical grouping of objects inside a database; the usual unit for access control and organisation |
 | **Object** | Table, view, stage, etc. Always lives in exactly one schema |
 
-**Fully qualified name:** `database.schema.object`. A session has a current database and schema, which resolve partially qualified names.
+**Fully qualified name:** `database.schema.object`.  
+A session has a current database and schema, which resolve partially qualified names.
 
 ```sql
 USE DATABASE sales;            -- sets current database
@@ -252,18 +253,7 @@ Constraint support is available on permanent, transient, temporary, and hybrid t
 
 ## 7. Constraints and Referential Integrity
 
-### 7.1 Constraint Types
-
-| Constraint | Meaning |
-| --- | --- |
-| **`NOT NULL`** | Column cannot hold NULL |
-| **`PRIMARY KEY`** | Uniquely identifies a row; implies `NOT NULL` and `UNIQUE` on the columns; one per table; can be composite |
-| **`UNIQUE`** | Values (or combinations) are unique; unlike a primary key, columns may contain NULLs |
-| **`FOREIGN KEY`** | Values must match a `PRIMARY KEY` or `UNIQUE` key in another table (or the same table): **referential integrity** |
-| **`CHECK`** | Row-level condition on column values (supported on standard tables and Snowflake-managed Iceberg tables) |
-| **`DEFAULT`, `AUTOINCREMENT` / `IDENTITY`** | Column value generation (not integrity constraints, but part of table definition) |
-
-### 7.2 Enforcement Matrix (The Most Important Point)
+### 7.1 Enforcement Matrix
 
 | Constraint | **Standard tables** (permanent, transient, temporary) | **Hybrid tables** |
 | --- | --- | --- |
@@ -272,8 +262,6 @@ Constraint support is available on permanent, transient, temporary, and hybrid t
 | `PRIMARY KEY` | **Not enforced** (informational metadata) | **Enforced**, and **required** on every hybrid table |
 | `UNIQUE` | **Not enforced** | **Enforced** |
 | `FOREIGN KEY` | **Not enforced** | **Enforced** (referenced tables must be in the **same database**) |
-
-> **Snowflake does not stop you from inserting duplicate primary keys or orphan foreign keys into a standard table.** The declarations are metadata for tools, documentation, and the optimizer. Integrity must be ensured by your pipeline and checks.
 
 ### 7.3 Constraint Properties
 
@@ -351,44 +339,7 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 | **Migration compatibility** | DDL from other databases loads without modification |
 | **Contract** | Communicates intended grain and keys to engineers |
 
-### 7.7 Ensuring Integrity on Standard Tables (Because Snowflake Won't)
-
-| Technique | How |
-| --- | --- |
-| **`NOT NULL` and `CHECK`** | Declare them: these **are** enforced |
-| **Idempotent loads** | Use `MERGE` on the business key instead of blind `INSERT`, so re-runs don't duplicate |
-| **Deduplicate on load** | `QUALIFY ROW_NUMBER() OVER (PARTITION BY pk ORDER BY load_ts DESC) = 1` |
-| **Staging then validation** | Load to staging, run quality checks, then promote to curated |
-| **Orphan checks** | Anti-join child to parent after each load |
-| **Streams + Tasks / Dynamic Tables** | Build integrity checks into the pipeline |
-| **Data Metric Functions (DMFs)** | Attach data quality metrics (for example, null counts, duplicate counts, freshness) to tables and schedule them (Enterprise and above; confirm availability) |
-| **Transform-layer tests** | Tools such as dbt tests (`unique`, `not_null`, `relationships`) |
-| **Use hybrid tables** | When you genuinely need enforced PK/FK/UNIQUE for transactional workloads |
-
-```sql
--- Duplicate primary keys
-SELECT order_id, COUNT(*) AS cnt
-FROM orders
-GROUP BY order_id
-HAVING COUNT(*) > 1;
-
--- Orphan foreign keys (child rows with no parent)
-SELECT o.*
-FROM orders o
-LEFT JOIN customers c ON o.customer_id = c.customer_id
-WHERE o.customer_id IS NOT NULL
-  AND c.customer_id IS NULL;
-
--- Idempotent upsert on the business key
-MERGE INTO customers t
-USING staging.customers_batch s
-  ON t.customer_id = s.customer_id
-WHEN MATCHED THEN UPDATE SET t.email = s.email, t.status = s.status
-WHEN NOT MATCHED THEN INSERT (customer_id, email, status)
-                      VALUES (s.customer_id, s.email, s.status);
-```
-
-### 7.8 Hybrid Tables and Referential Integrity
+### 7.7 Hybrid Tables and Referential Integrity
 
 | Point | Detail |
 | --- | --- |
@@ -400,14 +351,14 @@ WHEN NOT MATCHED THEN INSERT (customer_id, email, status)
 | **Typical use** | Transactional, low-latency, row-level lookups and updates where integrity must be guaranteed |
 | **Trade-offs** | Different storage and performance profile from standard tables; check the current hybrid-table limitations before choosing |
 
-### 7.9 Constraints Across Databases and Table Types
+### 7.8 Constraints Across Databases and Table Types
 
 * Foreign keys on **standard** tables may point to tables in other schemas or databases (they are only metadata).
 * Constraints are supported on permanent, transient, temporary, and hybrid tables; **not** on external tables.
 * `CHECK` constraints are limited to standard tables and Snowflake-managed Iceberg tables.
 * Cloning a table clones its constraint definitions.
 
-### 7.10 Keys and Generated Values
+### 7.9 Keys and Generated Values
 
 | Mechanism | Guarantee | Caveat |
 | --- | --- | --- |
@@ -463,17 +414,7 @@ WHEN NOT MATCHED THEN INSERT (customer_id, email, status)
  DEV and TEST: zero-copy CLONES of production databases
 ```
 
-### 10.2 Layered Schemas (Medallion / Staged)
-
-| Schema Layer | Purpose | Typical Settings |
-| --- | --- | --- |
-| `RAW` / `LANDING` | Data exactly as received | Transient or short retention if re-loadable; ingestion roles only |
-| `STAGING` | Cleansing, typing, dedupe | Transient, retention 0 to 1 day |
-| `CURATED` / `CORE` | Conformed business entities | Permanent, managed access, longer retention |
-| `MART` / `ANALYTICS` | Consumption-ready models | Permanent, managed access, read roles |
-| `SANDBOX` | Ad-hoc / experimentation | Transient, resource limits |
-
-### 10.3 Best Practices
+### 10.2 Best Practices
 
 * **Separate environments** (DEV/TEST/PROD) by database, and use **clones** to refresh lower environments.
 * Use **transient** databases/schemas for staging and reproducible data to cut Time Travel and Fail-safe cost.
