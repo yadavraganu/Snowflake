@@ -30,8 +30,6 @@ SELECT * FROM curated.orders;          -- schema.object (uses current database)
 SELECT * FROM sales.curated.orders;    -- fully qualified (recommended in pipelines)
 ```
 
-<br></br>
-
 ## 2. Databases
 
 ### 2.1 Database Types
@@ -117,8 +115,6 @@ SHOW PARAMETERS LIKE 'DATA_RETENTION%' IN DATABASE sales;
 ALTER SCHEMA sales.curated SET TAG governance.domain = 'sales';
 ```
 
-<br></br>
-
 ## 3. Schemas
 
 ### 3.1 Schema Types
@@ -200,8 +196,6 @@ ORDER BY active_bytes DESC;
 | `DATABASE_STORAGE_USAGE_HISTORY` | Daily database storage and Fail-safe bytes |
 | `TABLE_STORAGE_METRICS` | Active, Time Travel, Fail-safe, and retained-for-clone bytes per table |
 
-<br></br>
-
 ## 4. Time Travel, Fail-safe, and Retention (Single Reference)
 
 | Feature | Detail |
@@ -213,8 +207,6 @@ ORDER BY active_bytes DESC;
 | **Retention of 0** | Disables Time Travel and `UNDROP`. A **permanent** table still has Fail-safe, but you cannot self-recover from it |
 | **Storage billing** | Active data + Time Travel data + Fail-safe data, all measured compressed |
 
-<br></br>
-
 ## 5. Zero-Copy Cloning of Databases and Schemas
 
 * A clone is a **metadata-only snapshot**: it points to the same micro-partitions and consumes **no extra storage** until data changes in either copy.
@@ -223,8 +215,6 @@ ORDER BY active_bytes DESC;
 * **Common uses:** instant dev/test copies, safe release testing, point-in-time snapshots, backups before risky changes.
 * **Behaviours to remember** (confirm details in the cloning docs): tasks in a clone start **suspended**; privileges granted on **child objects** are retained but privileges on the cloned container itself are not copied; some object types (for example, certain stages and pipes) have special handling; clones of shared databases are not allowed.
 * **Clone type rules** by table type are in section 6.3.
-
-<br></br>
 
 ## 6. Tables: Permanent, Transient, and Temporary (Plus Other Types)
 
@@ -479,8 +469,6 @@ Enforcement rules (primary key required, same-database foreign keys, no `NOT ENF
 
 **Composite and self-referencing keys** are allowed (for example, `PRIMARY KEY (order_id, line_no)` or an `employee.manager_id` foreign key referencing `employee.employee_id`); like other FKs they are informational on standard tables.
 
-<br></br>
-
 ## 8. Identifiers and Naming
 
 | Rule | Detail |
@@ -493,8 +481,6 @@ Enforcement rules (primary key required, same-database foreign keys, no `NOT ENF
 | **Uniqueness** | Names are unique **per container**: database names per account, schema names per database, object names per schema (and type rules apply) |
 | **Convention advice** | Use unquoted `UPPER_SNAKE_CASE`, avoid quoted mixed-case names |
 
-<br></br>
-
 ## 9. Access Control on Databases and Schemas
 
 | Object | Key Privileges |
@@ -506,50 +492,7 @@ Enforcement rules (primary key required, same-database foreign keys, no `NOT ENF
 * `FUTURE` and `ALL` grants at schema or database level cover new and existing objects.
 * Dropping or replacing a database/schema requires `OWNERSHIP`.
 
-<br></br>
-
-## 10. Design Patterns and Best Practices
-
-### 10.1 Environment and Domain Layout
-
-```
- Option A: database per environment             Option B: database per domain + env
- ┌ RAW_DB      ┐  ┌ STAGING_DB ┐  ┌ PROD_DB ┐    ┌ PROD_SALES ┐  ┌ PROD_FINANCE ┐
- │ schemas by  │  │ transient  │  │ curated │    │ RAW        │  │ RAW          │
- │ source      │  │            │  │ marts   │    │ CURATED    │  │ CURATED      │
- └─────────────┘  └────────────┘  └─────────┘    │ MART       │  │ MART         │
-                                                  └────────────┘  └──────────────┘
- DEV and TEST: zero-copy CLONES of production databases
-```
-
-### 10.2 Best Practices
-
-* **Separate environments** (DEV/TEST/PROD) by database, and refresh lower environments with **clones** (transient clones to save storage).
-* **Match table type to data criticality** (section 6.5): permanent for sources of truth, transient for reproducible layers, temporary for in-session work.
-* Use **managed access schemas** for curated and shared layers.
-* Set **retention** deliberately per layer (section 4) instead of leaving the default everywhere.
-* Keep **integrity checks in the pipeline**, since PK/FK on standard tables are informational; declare them for documentation and tools, and use `RELY` only when integrity is guaranteed.
-* Grant access through **roles** (database roles for per-database tiers), never directly to users.
-
-<br></br>
-
-## 11. Common Pitfalls
-
-* Assuming **PRIMARY KEY / FOREIGN KEY / UNIQUE** are enforced on standard tables (they are not).
-* Setting **`RELY`** on constraints the data violates, causing **wrong query results**.
-* Using **`CREATE OR REPLACE DATABASE/SCHEMA`** in production scripts and losing data and grants.
-* Keeping **irreplaceable data in transient or temporary tables** (no Fail-safe; temporary data disappears with the session).
-* Expecting to **convert** a table, schema, or database between permanent and transient, or to create a permanent table in a transient schema.
-* Assuming a **temporary table** is visible to tasks, other sessions, or other users, or that it survives a pooled connection being reused.
-* Leaving **long-lived sessions** open with large temporary tables, so storage keeps accruing.
-* Setting retention to **0 on a permanent table** and expecting self-service recovery from Fail-safe.
-* Renaming or swapping objects without checking **dependent views, tasks, and pipes** (section 3.5).
-* Using **quoted mixed-case identifiers** and then writing unquoted queries that cannot find them.
-* Believing a **clone** is a backup that stays in sync (it is an independent snapshot).
-
-<br></br>
-
-## 12. Quick Interview Q&A
+## 10. Quick Interview Q&A
 
 | Question | Short Answer |
 | --- | --- |
