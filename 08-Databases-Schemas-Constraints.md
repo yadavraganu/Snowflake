@@ -38,8 +38,8 @@ SELECT * FROM sales.curated.orders;    -- fully qualified (recommended in pipeli
 
 | Type | Description | Key Properties |
 | --- | --- | --- |
-| **Standard (permanent) database** | The default; holds your data | Time Travel up to 90 days (Enterprise+), **Fail-safe 7 days** for permanent tables |
-| **Transient database** | `CREATE TRANSIENT DATABASE` | Time Travel **0 or 1 day**, **no Fail-safe**; all schemas and tables created inside are transient; lower storage cost |
+| **Standard (permanent) database** | The default; holds your data | Can contain permanent and transient schemas and tables (retention rules in section 4) |
+| **Transient database** | `CREATE TRANSIENT DATABASE` | Everything created inside is transient: lower storage cost, no Fail-safe (section 6) |
 | **Shared / imported database** | Created `FROM SHARE` or from a Marketplace / Internal Marketplace listing | **Read-only** to the consumer; no storage copy; privileges managed through `IMPORTED PRIVILEGES` |
 | **Application database** | Created when a Native App is installed | Managed by the app and its application roles |
 | **Catalog-linked database** | Linked to an external Iceberg REST catalog | Auto-syncs namespaces and Iceberg tables (see the Iceberg guide) |
@@ -49,15 +49,9 @@ SELECT * FROM sales.curated.orders;    -- fully qualified (recommended in pipeli
 
 **Note:** There is **no temporary database**. Temporary objects exist at the **table** level (and a few others), not for databases or schemas.
 
-### 2.2 Permanent vs Transient
+### 2.2 Permanent vs Transient Databases
 
-| Aspect | Permanent | Transient |
-| --- | --- | --- |
-| Time Travel | 0 to 1 day (Standard); up to **90 days** (Enterprise and above) | **0 or 1 day** |
-| Fail-safe | **7 days** | **None** |
-| Storage cost | Includes Time Travel and Fail-safe storage | Lower: no Fail-safe storage |
-| Typical use | Production, curated, critical data | Staging, scratch, easily reproducible data |
-| Child objects | Can contain permanent **and** transient schemas/tables | **All** children are transient |
+A transient database makes **everything inside it transient** (all schemas and tables), trading Fail-safe and long Time Travel for lower storage cost. Use it for staging, scratch, and reproducible data. The full permanent, transient, and temporary comparison is in section 6, and retention rules are in section 4.
 
 ### 2.3 Database DDL and Operations
 
@@ -95,7 +89,6 @@ UNDROP DATABASE sales_dev;       -- within the Time Travel retention period
 | **`SWAP WITH`** | Atomically exchanges two databases' names and metadata: useful for blue/green releases |
 | **`DROP`** | Cascades to all schemas and objects; dropping a database with dependencies (views in other databases, shares) needs care |
 | **`UNDROP`** | Restores a dropped database (and its schemas/objects) if still within retention; fails if a database with the same name exists |
-| **Retention** | `DATA_RETENTION_TIME_IN_DAYS` at database level is **inherited** by schemas and tables without their own value (see the parameters guide) |
 
 ### 2.4 Replication, Failover, and Sharing (Overview)
 
@@ -132,8 +125,8 @@ ALTER SCHEMA sales.curated SET TAG governance.domain = 'sales';
 
 | Type | Description | Key Properties |
 | --- | --- | --- |
-| **Permanent schema** | Default schema type | Contains permanent (and optionally transient) tables; retention and Fail-safe as per the table type |
-| **Transient schema** | `CREATE TRANSIENT SCHEMA` | All tables created inside are transient: Time Travel 0 or 1 day, **no Fail-safe** |
+| **Permanent schema** | Default schema type | Can hold permanent, transient, and temporary tables |
+| **Transient schema** | `CREATE TRANSIENT SCHEMA` | All tables created inside are transient (see 3.3 and section 6) |
 | **Managed access schema** | `WITH MANAGED ACCESS` | Only the **schema owner** or a role with **`MANAGE GRANTS`** can grant privileges on objects in the schema; object owners cannot |
 | **`PUBLIC` schema** | Created automatically in every new database | Convenience default; avoid putting real data here |
 | **`INFORMATION_SCHEMA`** | Created automatically in every database | **Read-only** views and table functions with metadata about that database's objects (and some account-level metadata) |
@@ -165,9 +158,7 @@ UNDROP SCHEMA sales.staging;
 | --- | --- |
 | **Transient is inherited downward** | Everything created in a transient database or schema is transient. A permanent table **cannot** be created in a transient schema |
 | **Transient cannot be converted** | You cannot alter a permanent schema/database to transient (or the reverse); recreate and copy instead |
-| **Managed access centralises grants** | Even the object owner cannot `GRANT` on its own table in a managed access schema; the schema owner or `MANAGE GRANTS` holder does it |
-| **Managed access and ownership** | Owners keep ownership and can still use the object; only the grant ability moves |
-| **Switching managed access** | `ENABLE` or `DISABLE` MANAGED ACCESS on an existing schema is allowed |
+| **Managed access centralises grants** | Even the object owner cannot `GRANT` on its own table; only the schema owner or a `MANAGE GRANTS` holder can. Owners keep ownership and can still use the object. `ENABLE` / `DISABLE MANAGED ACCESS` can be switched on an existing schema |
 
 ### 3.4 `INFORMATION_SCHEMA` vs `ACCOUNT_USAGE`
 
@@ -211,15 +202,16 @@ ORDER BY active_bytes DESC;
 
 <br></br>
 
-## 4. Data Protection and Retention at Database/Schema Level
+## 4. Time Travel, Fail-safe, and Retention (Single Reference)
 
 | Feature | Detail |
 | --- | --- |
-| **Time Travel** | Query, clone, or restore data and dropped objects within `DATA_RETENTION_TIME_IN_DAYS` |
-| **Retention hierarchy** | Account, Database, Schema, Table: the most specific explicit value wins; `MIN_DATA_RETENTION_TIME_IN_DAYS` (account) is a floor |
-| **Fail-safe** | 7-day last-resort recovery after Time Travel, **permanent** objects only |
-| **UNDROP** | Available for databases, schemas, and tables (and some other objects) within retention |
-| **Cloning in time** | `CLONE ... AT` or `CLONE ... BEFORE` creates a copy as of a past point within retention |
+| **Time Travel** | Query, clone, or restore data, and recover dropped objects, within `DATA_RETENTION_TIME_IN_DAYS`. Maximum retention depends on the **table type and edition** (table in section 6.1) |
+| **Fail-safe** | Fixed **7-day** last-resort recovery after Time Travel ends; **permanent tables only**; not configurable and not self-service (Snowflake Support performs recovery) |
+| **Retention hierarchy** | Account, Database, Schema, Table: the most specific explicit value wins. Account-level `MIN_DATA_RETENTION_TIME_IN_DAYS` is a floor (see the parameters guide) |
+| **`UNDROP`** | Works for databases, schemas, and tables within retention; fails if an object with the same name already exists |
+| **Retention of 0** | Disables Time Travel and `UNDROP`. A **permanent** table still has Fail-safe, but you cannot self-recover from it |
+| **Storage billing** | Active data + Time Travel data + Fail-safe data, all measured compressed |
 
 <br></br>
 
@@ -230,24 +222,144 @@ ORDER BY active_bytes DESC;
 * Clone at database, schema, or table level, optionally **as of a past time** (`AT` / `BEFORE`, within retention).
 * **Common uses:** instant dev/test copies, safe release testing, point-in-time snapshots, backups before risky changes.
 * **Behaviours to remember** (confirm details in the cloning docs): tasks in a clone start **suspended**; privileges granted on **child objects** are retained but privileges on the cloned container itself are not copied; some object types (for example, certain stages and pipes) have special handling; clones of shared databases are not allowed.
-* **Clone type rule (confirm in the cloning docs):** a transient object can only be cloned as transient (or temporary, for tables), never as permanent. A permanent object can typically be cloned as transient (for example, `CREATE TRANSIENT DATABASE ... CLONE`) to save Time Travel and Fail-safe storage on dev copies.
+* **Clone type rules** by table type are in section 6.3.
 
 <br></br>
 
-## 6. Table Types (Context for Constraints and Retention)
+## 6. Tables: Permanent, Transient, and Temporary (Plus Other Types)
 
-| Table Type | Persistence | Time Travel | Fail-safe | Constraints (PK / UNIQUE / FK) | Notes |
-| --- | --- | --- | --- | --- | --- |
-| **Permanent** (standard) | Until dropped | Up to 90 days (Enterprise+) | 7 days | Informational | Default |
-| **Transient** | Until dropped | 0 or 1 day | None | Informational | Staging / reproducible data |
-| **Temporary** | **Session only** | 0 or 1 day | None | Informational | Visible only to the creating session; dropped at session end |
-| **External** | Data stays in external storage | None | None | Not applicable (read-only) | Superseded in many cases by Iceberg / Delta Direct |
-| **Hybrid** | Until dropped | See current docs | See current docs | **Enforced** (PK required) | Row-store for transactional (OLTP-style) workloads |
-| **Dynamic** | Until dropped | As permanent/transient | As permanent/transient | Informational | Declarative, auto-refreshed pipelines |
-| **Iceberg** | Until dropped | Retention-based | Only on Snowflake storage | Informational; `CHECK` on Snowflake-managed | Open table format (see the Iceberg guide) |
-| **Event table** | Until dropped | Per settings | Per settings | n/a | Telemetry (logs, traces) |
+### 6.1 The Three Core Table Types
 
-Constraint support is available on permanent, transient, temporary, and hybrid tables; **only hybrid tables enforce `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY`**.
+| Aspect | **Permanent** | **Transient** | **Temporary** |
+| --- | --- | --- | --- |
+| **Create with** | `CREATE TABLE` | `CREATE TRANSIENT TABLE` | `CREATE TEMPORARY TABLE` (synonyms: `TEMP`, `LOCAL TEMP`, `GLOBAL TEMP`, `VOLATILE`; all are session-scoped) |
+| **Lifetime** | Until dropped | Until dropped | **Until the creating session ends** (or dropped earlier) |
+| **Visibility** | Any session with privileges | Any session with privileges | **Only the creating session**: not other sessions, tasks, or users, even with grants |
+| **Time Travel (Standard edition)** | 0 or 1 day | 0 or 1 day | 0 or 1 day |
+| **Time Travel (Enterprise and above)** | **0 to 90 days** | 0 or 1 day | 0 or 1 day |
+| **Fail-safe** | **7 days** | **None** | **None** |
+| **Recovery after drop** | `UNDROP` within retention, then Fail-safe via Snowflake Support | `UNDROP` within retention (at most 1 day) | Not recoverable once the session has ended |
+| **Storage billed for** | Active + Time Travel + Fail-safe | Active + Time Travel (at most 1 day) | Active + Time Travel (at most 1 day), only while the session lives |
+| **Allowed in** | Permanent schemas and databases only | Permanent or transient schemas | Any schema |
+| **Constraints** | Supported | Supported | Supported |
+| **Typical use** | Sources of truth, curated and compliance data | Staging and landing data, reproducible layers, dev copies | Intermediate results within one job or session |
+
+* **Constraints:** `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` are informational on all three; `NOT NULL` and `CHECK` are enforced (see section 7).
+* **Containers decide the type:** a table created in a transient schema or database is transient (see 3.3), so a permanent table cannot live there.
+* **Name shadowing:** a temporary table with the same name as a permanent or transient table in the same schema **hides** that table for the creating session only, which can silently redirect queries.
+
+### 6.2 Creating the Three Types
+
+```sql
+-- Permanent: default
+CREATE TABLE orders (
+  order_id NUMBER NOT NULL, customer_id NUMBER, order_ts TIMESTAMP_NTZ, amount NUMBER(12,2)
+) DATA_RETENTION_TIME_IN_DAYS = 14;
+
+-- Transient: no Fail-safe, short Time Travel
+CREATE TRANSIENT TABLE stg_orders (
+  order_id NUMBER, customer_id NUMBER, order_ts TIMESTAMP_NTZ, amount NUMBER(12,2)
+) DATA_RETENTION_TIME_IN_DAYS = 0;
+
+-- Temporary: session-scoped scratch table
+CREATE TEMPORARY TABLE tmp_daily_totals AS
+SELECT customer_id, SUM(amount) AS total
+FROM orders
+GROUP BY customer_id;
+
+-- Change retention later (cannot exceed the type's maximum)
+ALTER TABLE orders SET DATA_RETENTION_TIME_IN_DAYS = 30;
+
+DROP TABLE tmp_daily_totals;   -- release storage early instead of waiting for session end
+```
+
+### 6.3 Converting and Cloning Between Types
+
+There is **no `ALTER TABLE` that changes a table's type**. To change type, create a new table and copy or swap.
+
+```sql
+-- Promote staging data into a permanent table
+CREATE TABLE orders_curated AS SELECT * FROM stg_orders;      -- new table is permanent (in a permanent schema)
+
+-- Atomic cutover to the new table
+ALTER TABLE orders_curated SWAP WITH orders;
+
+-- Cheap dev copy of a permanent table as transient
+CREATE TRANSIENT TABLE orders_dev CLONE orders;
+```
+
+| Rule | Detail |
+| --- | --- |
+| **CTAS / `LIKE`** | The new table's type comes from the keyword you use (and from a transient container) |
+| **Cloning** | A transient or temporary table **cannot** be cloned as permanent. A permanent table can be cloned as transient or temporary (confirm exact combinations in the cloning docs) |
+| **Clone at a past time** | `CLONE ... AT` or `BEFORE` works within the retention period, so a transient table with 0 days cannot be cloned as of the past |
+| **Schemas and databases** | Same idea: a transient schema or database cannot be altered into permanent (see 3.3) |
+
+### 6.4 Temporary Table Behaviour in Practice
+
+| Topic | Detail |
+| --- | --- |
+| **Scope** | Tied to one session. A new connection, a new worksheet session, or a different user sees nothing |
+| **Tasks and other jobs** | A task runs in its own session, so it cannot see a temporary table created elsewhere |
+| **Stored procedures** | They run in the caller's session, so a temporary table they create normally stays until the session ends or you drop it |
+| **Connection pools** | Pooled sessions are reused, so a temporary table can outlive a "request" and collide with the next user of that session: use unique names and drop explicitly |
+| **Cost** | Storage is billed while the table exists; a client that disconnects without closing the session cleanly can leave data lingering until the session expires |
+| **Snowpark** | `DataFrame.cache_result()` materializes results in a temporary table |
+| **Not for** | Anything another session, task, or person must read, or anything that must survive the session |
+
+### 6.5 Choosing the Right Type
+
+| Data | Recommended Type | Retention |
+| --- | --- | --- |
+| Business source of truth, financial or regulated data | **Permanent** | Set per SLA (up to 90 days on Enterprise and above) |
+| Re-loadable landing/staging data from files or streams | **Transient** | 0 or 1 day |
+| High-churn intermediate layers that pipelines rebuild | **Transient** | 0 or 1 day (avoids Fail-safe storage on rewritten data) |
+| Dev and test copies of production | **Transient** clone | 0 or 1 day |
+| Step-by-step intermediate results inside one job | **Temporary** | Default, dropped when done |
+| Curated marts consumed by BI | **Permanent** | Moderate (for example, 7 to 14 days) |
+
+```
+ Must another session, task, or user read it, or must it survive the session?
+   │ No  ──► TEMPORARY
+   │ Yes ──► Can you rebuild it from upstream sources if it is lost or corrupted?
+               │ Yes ──► TRANSIENT  (lower cost, 0-1 day Time Travel, no Fail-safe)
+               │ No  ──► PERMANENT  (Time Travel + 7-day Fail-safe)
+```
+
+**Trade-off to remember:** transient and temporary tables have no Fail-safe, so an accidental drop or overwrite is **unrecoverable** once Time Travel (at most 1 day) has passed.
+
+### 6.6 Finding Table Types and Their Cost
+
+```sql
+-- Table type and retention in one database
+SELECT table_schema, table_name, table_type, is_transient, retention_time
+FROM sales.INFORMATION_SCHEMA.TABLES
+WHERE table_schema <> 'INFORMATION_SCHEMA'
+ORDER BY table_schema, table_name;
+
+SHOW TABLES IN SCHEMA sales.curated;     -- check the kind and retention_time columns
+
+-- Where Fail-safe and Time Travel storage goes, split by table type
+SELECT is_transient,
+       ROUND(SUM(active_bytes)     / POW(1024,4), 3) AS active_tb,
+       ROUND(SUM(time_travel_bytes)/ POW(1024,4), 3) AS time_travel_tb,
+       ROUND(SUM(failsafe_bytes)   / POW(1024,4), 3) AS failsafe_tb
+FROM snowflake.account_usage.table_storage_metrics
+WHERE deleted = FALSE
+GROUP BY is_transient;
+```
+
+Temporary tables appear only for the session that created them. Review large permanent tables with high churn: if they are reproducible, converting them to transient (create, copy, swap) can remove their Fail-safe storage.
+
+### 6.7 Other Table Types
+
+| Table Type | Persistence | Constraints (PK / UNIQUE / FK) | Notes |
+| --- | --- | --- | --- |
+| **External** | Data stays in external storage | Not applicable (read-only) | Often superseded by Iceberg or Delta Direct |
+| **Hybrid** | Until dropped | **Enforced** (PK required) | Row-store for transactional (OLTP-style) workloads; check current docs for Time Travel and Fail-safe |
+| **Dynamic** | Until dropped | Informational | Declarative, auto-refreshed; can be created transient to cut storage cost |
+| **Iceberg** | Until dropped | Informational; `CHECK` on Snowflake-managed | Open table format; Fail-safe only on Snowflake storage (see the Iceberg guide) |
+| **Event table** | Until dropped | n/a | Telemetry (logs, traces) |
 
 <br></br>
 
@@ -263,7 +375,7 @@ Constraint support is available on permanent, transient, temporary, and hybrid t
 | `UNIQUE` | **Not enforced** | **Enforced** |
 | `FOREIGN KEY` | **Not enforced** | **Enforced** (referenced tables must be in the **same database**) |
 
-### 7.3 Constraint Properties
+### 7.2 Constraint Properties
 
 | Property | Meaning for Standard Tables | Meaning for Hybrid Tables |
 | --- | --- | --- |
@@ -275,7 +387,7 @@ Constraint support is available on permanent, transient, temporary, and hybrid t
 
 **Warning on `RELY`:** if you set `RELY` but the data **violates** the constraint, queries that depend on the optimizer's assumption can return **wrong results** (for example, a join eliminated because Snowflake trusts a key that is not actually unique). Use it only when integrity is guaranteed.
 
-### 7.4 Syntax Examples
+### 7.3 Syntax Examples
 
 ```sql
 -- Inline and out-of-line constraints on a standard table
@@ -315,7 +427,7 @@ CREATE HYBRID TABLE accounts (
 );
 ```
 
-### 7.5 Inspecting Constraints
+### 7.4 Inspecting Constraints
 
 ```sql
 SHOW PRIMARY KEYS  IN TABLE customers;
@@ -329,36 +441,33 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 
 `SHOW IMPORTED KEYS` and `SHOW EXPORTED KEYS` are widely used by BI and data modelling tools to draw relationships.
 
-### 7.6 Why Declare Informational Constraints?
+### 7.5 Why Declare Informational Constraints?
 
 | Reason | Detail |
 | --- | --- |
 | **Documentation and ERDs** | Modelling and catalog tools read them to show relationships |
 | **BI tool behaviour** | Some BI tools use PK/FK metadata to auto-join or validate models |
-| **Optimizer hints** | With `RELY`, join elimination and similar optimizations become possible |
+| **Optimizer hints** | `RELY` lets the optimizer use them (see 7.2) |
 | **Migration compatibility** | DDL from other databases loads without modification |
 | **Contract** | Communicates intended grain and keys to engineers |
 
-### 7.7 Hybrid Tables and Referential Integrity
+### 7.6 Hybrid Tables and Referential Integrity
+
+Enforcement rules (primary key required, same-database foreign keys, no `NOT ENFORCED`, validation on `ALTER`) are in 7.1 and 7.2.
 
 | Point | Detail |
 | --- | --- |
-| **Primary key required** | Every hybrid table needs one |
-| **Enforced** | PK, UNIQUE, and FK violations raise errors at DML time |
-| **Same-database FKs** | Foreign keys between hybrid tables must reference tables in the **same database** |
-| **No `NOT ENFORCED`** | Cannot be turned off for PK/FK/UNIQUE |
-| **`ALTER TABLE` adds validate data** | Adding UNIQUE or FK validates existing rows |
 | **Typical use** | Transactional, low-latency, row-level lookups and updates where integrity must be guaranteed |
 | **Trade-offs** | Different storage and performance profile from standard tables; check the current hybrid-table limitations before choosing |
 
-### 7.8 Constraints Across Databases and Table Types
+### 7.7 Constraints Across Databases and Table Types
 
 * Foreign keys on **standard** tables may point to tables in other schemas or databases (they are only metadata).
 * Constraints are supported on permanent, transient, temporary, and hybrid tables; **not** on external tables.
 * `CHECK` constraints are limited to standard tables and Snowflake-managed Iceberg tables.
 * Cloning a table clones its constraint definitions.
 
-### 7.9 Keys and Generated Values
+### 7.8 Keys and Generated Values
 
 | Mechanism | Guarantee | Caveat |
 | --- | --- | --- |
@@ -395,7 +504,6 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 
 * To use any object you need `USAGE` on its **database** and **schema** plus the object privilege.
 * `FUTURE` and `ALL` grants at schema or database level cover new and existing objects.
-* **Managed access schemas** centralise grant control (see the roles guide).
 * Dropping or replacing a database/schema requires `OWNERSHIP`.
 
 <br></br>
@@ -416,17 +524,11 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 
 ### 10.2 Best Practices
 
-* **Separate environments** (DEV/TEST/PROD) by database, and use **clones** to refresh lower environments.
-* Use **transient** databases/schemas for staging and reproducible data to cut Time Travel and Fail-safe cost.
+* **Separate environments** (DEV/TEST/PROD) by database, and refresh lower environments with **clones** (transient clones to save storage).
+* **Match table type to data criticality** (section 6.5): permanent for sources of truth, transient for reproducible layers, temporary for in-session work.
 * Use **managed access schemas** for curated and shared layers.
-* Set **retention** deliberately per layer (see the parameters guide) instead of leaving the default everywhere.
-* Keep **business logic and integrity checks in the pipeline** since PK/FK on standard tables are informational.
-* Declare **PK/FK for documentation and tools**, and use `RELY` only when integrity is guaranteed.
-* Use **fully qualified names** in scripts and pipelines; avoid relying on session context.
-* Keep the **`PUBLIC` schema empty**, and avoid granting to `PUBLIC`.
-* Use **`SWAP WITH`** for atomic cutovers (blue/green schema or database swaps).
-* Use **`UNDROP`** and **Time Travel clones** as safety nets, and know the retention window.
-* Apply **tags and comments** on databases and schemas (owner, domain, data classification) for governance.
+* Set **retention** deliberately per layer (section 4) instead of leaving the default everywhere.
+* Keep **integrity checks in the pipeline**, since PK/FK on standard tables are informational; declare them for documentation and tools, and use `RELY` only when integrity is guaranteed.
 * Grant access through **roles** (database roles for per-database tiers), never directly to users.
 
 <br></br>
@@ -436,14 +538,13 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 * Assuming **PRIMARY KEY / FOREIGN KEY / UNIQUE** are enforced on standard tables (they are not).
 * Setting **`RELY`** on constraints the data violates, causing **wrong query results**.
 * Using **`CREATE OR REPLACE DATABASE/SCHEMA`** in production scripts and losing data and grants.
-* Creating a **transient** database for data that actually needs Fail-safe.
-* Trying to put a **permanent table in a transient schema**, or expecting to convert transient to permanent.
-* Granting `SELECT` but forgetting **`USAGE` on database and schema**.
-* Renaming or swapping objects without checking **dependent views, tasks, and pipes**.
-* Forgetting that **tasks in clones start suspended**.
-* Leaving **`PUBLIC`** schema as the default dumping ground.
+* Keeping **irreplaceable data in transient or temporary tables** (no Fail-safe; temporary data disappears with the session).
+* Expecting to **convert** a table, schema, or database between permanent and transient, or to create a permanent table in a transient schema.
+* Assuming a **temporary table** is visible to tasks, other sessions, or other users, or that it survives a pooled connection being reused.
+* Leaving **long-lived sessions** open with large temporary tables, so storage keeps accruing.
+* Setting retention to **0 on a permanent table** and expecting self-service recovery from Fail-safe.
+* Renaming or swapping objects without checking **dependent views, tasks, and pipes** (section 3.5).
 * Using **quoted mixed-case identifiers** and then writing unquoted queries that cannot find them.
-* Expecting an **`UNDROP`** after the retention period has passed (Fail-safe is not self-service).
 * Believing a **clone** is a backup that stays in sync (it is an independent snapshot).
 
 <br></br>
@@ -454,7 +555,7 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 | --- | --- |
 | Snowflake object hierarchy? | Organization, account, database, schema, then objects such as tables and views. |
 | Types of databases? | Standard (permanent), transient, shared/imported (read-only), application, catalog-linked, secondary (replica), and clones; `SNOWFLAKE` and `SNOWFLAKE_SAMPLE_DATA` are system shared databases. There is no temporary database. |
-| Transient vs permanent database? | Transient has Time Travel of 0 or 1 day and no Fail-safe, with lower storage cost; everything inside is transient. |
+| Permanent vs transient vs temporary tables? | Permanent: up to 90 days Time Travel (Enterprise+) plus 7-day Fail-safe. Transient: persists until dropped, 0 or 1 day Time Travel, no Fail-safe. Temporary: visible only to the creating session, dropped when it ends, 0 or 1 day Time Travel, no Fail-safe. |
 | Types of schemas? | Permanent, transient, managed access, plus the automatic `PUBLIC` and `INFORMATION_SCHEMA`. |
 | What is a managed access schema? | A schema where only the schema owner or a `MANAGE GRANTS` role can grant privileges on its objects. |
 | What does `INFORMATION_SCHEMA` provide? | Read-only metadata views and table functions for that database, in real time. |
@@ -471,4 +572,11 @@ SELECT * FROM sales.INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;
 | How do unquoted identifiers behave? | They are case-insensitive and stored in uppercase; quoted identifiers are case-sensitive. |
 | Are AUTOINCREMENT values gap-free? | No. They are unique but can have gaps and are not guaranteed to be ordered, particularly with parallel loads. |
 | How do you check what depends on a database before dropping it? | Query `ACCOUNT_USAGE.OBJECT_DEPENDENCIES` (and review shares, tasks, and cross-database views). |
-| Can a permanent database be cloned as transient? | Generally yes (`CREATE TRANSIENT DATABASE ... CLONE`), to cut dev storage cost; a transient object cannot be cloned as permanent. Confirm in the cloning docs. |
+| Can you clone a transient or temporary table as permanent? | No. A permanent table can be cloned as transient or temporary; confirm exact combinations in the cloning docs. |
+| How do you turn a transient table into a permanent one? | You cannot alter its type: create a permanent table with CTAS (in a permanent schema), then swap or rename. |
+| Who can see a temporary table? | Only the session that created it; it is dropped when that session ends and cannot be recovered afterwards. |
+| What happens if a temporary table has the same name as a permanent one? | Within that session, the temporary table hides the permanent one. |
+| What is the maximum Time Travel for transient and temporary tables? | 1 day, even on Enterprise edition and above. |
+| Does a permanent table with retention 0 have Fail-safe? | Yes, 7 days, but recovery is only through Snowflake Support. |
+| What storage does a permanent table incur beyond active data? | Time Travel data (within retention) and Fail-safe data (7 days). |
+| How do you find transient tables and their retention? | `INFORMATION_SCHEMA.TABLES` or `ACCOUNT_USAGE.TABLES` (`IS_TRANSIENT`, `RETENTION_TIME`), or `SHOW TABLES`. |
